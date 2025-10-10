@@ -1,0 +1,32 @@
+<svg width="300" height="300" viewBox="0 0 300 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background gradient -->
+  <defs>
+    <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8b5cf6;stop-opacity:0.2" />
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:0.05" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background rectangle -->
+  <rect width="300" height="300" fill="url(#bg-gradient)"/>
+  
+  <!-- Music note icon -->
+  <g transform="translate(75, 75)">
+    <!-- Note stem -->
+    <rect x="110" y="30" width="8" height="90" rx="4" fill="#8b5cf6" opacity="0.6"/>
+    
+    <!-- Note head (ellipse) -->
+    <ellipse cx="102" cy="128" rx="24" ry="18" fill="#8b5cf6" opacity="0.6"/>
+    
+    <!-- Flag -->
+    <path d="M 118 30 Q 140 35 140 55 Q 140 75 118 70 Z" fill="#8b5cf6" opacity="0.6"/>
+    
+    <!-- Second note -->
+    <rect x="55" y="50" width="8" height="80" rx="4" fill="#8b5cf6" opacity="0.6"/>
+    <ellipse cx="47" cy="138" rx="24" ry="18" fill="#8b5cf6" opacity="0.6"/>
+    <path d="M 63 50 Q 85 55 85 75 Q 85 95 63 90 Z" fill="#8b5cf6" opacity="0.6"/>
+  </g>
+  
+  <!-- Border -->
+  <rect width="300" height="300" fill="none" stroke="#8b5cf6" stroke-width="2" opacity="0.2"/>
+</svg>
