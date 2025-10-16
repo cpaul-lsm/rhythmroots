@@ -10,18 +10,10 @@ import { Users, Mail, Phone, Calendar, BookOpen, DollarSign, Search, Plus } from
 	let searchTerm = $state('');
 	let selectedCourse = $state('all');
 let showCreateModal = $state(false);
-let showCustomFieldsModal = $state(false);
 
 	// Get unique courses for filtering
 	let courses = $state<any[]>([]);
 let dynamicFields = $state<any[]>([]);
-let fieldSets = $state<any[]>([]);
-let selectedFieldSetId = $state<string>('');
-let fieldsForSelectedSet = $state<any[]>([]);
-let setForm = $state({ name: '', description: '' });
-let fieldForm = $state({ key: '', label: '', type: 'text', required: false, options: '' as any, order_index: 0 });
-let mappingCourseId = $state<string>('');
-let attachedSetIdsForCourse = $state<string[]>([]);
 
 	onMount(async () => {
 		await Promise.all([loadStudents(), loadCourses()]);
@@ -83,168 +75,47 @@ let attachedSetIdsForCourse = $state<string[]>([]);
 		}
 	}
 
-	// Load dynamic fields for a selected course by fetching attached field sets and fields
-	function loadDynamicFields(courseId: string) {
+	// Load custom fields from field sets attached to the selected course
+	async function loadDynamicFields(courseId: string) {
 		dynamicFields = [];
 		if (!courseId) return;
-		supabase
-			.from('course_field_sets')
-			.select('field_set_id, student_fields:student_field_sets(student_fields(*))')
-			.eq('course_id', courseId)
-			.eq('active', true)
-			.order('order_index')
-			.then(({ data, error }) => {
-				if (error) {
-					console.error('Error loading dynamic fields:', error);
-					return;
-				}
-				const fields: any[] = [];
-				(data || []).forEach((row: any) => {
-					const setFields = row.student_fields?.student_fields || [];
-					setFields
-						.filter((f: any) => f.active)
-						.sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
-						.forEach((f: any) => fields.push(f));
-				});
-				dynamicFields = fields;
-			});
+		
+		try {
+			// Get field sets attached to this course
+			const { data: courseFieldSets, error: courseError } = await supabase
+				.from('course_field_sets')
+				.select('field_set_id')
+				.eq('course_id', courseId);
+			
+			if (courseError) {
+				console.error('Error loading course field sets:', courseError);
+				return;
+			}
+			
+			if (!courseFieldSets || courseFieldSets.length === 0) {
+				return;
+			}
+			
+			// Get all fields for these field sets
+			const fieldSetIds = courseFieldSets.map((cfs: any) => cfs.field_set_id);
+			const { data: fields, error: fieldsError } = await supabase
+				.from('student_fields')
+				.select('*')
+				.in('field_set_id', fieldSetIds)
+				.eq('active', true)
+				.order('order_index');
+			
+			if (fieldsError) {
+				console.error('Error loading fields:', fieldsError);
+				return;
+			}
+			
+			dynamicFields = fields || [];
+		} catch (error) {
+			console.error('Error in loadDynamicFields:', error);
+		}
 	}
 
-// Custom fields manager helpers
-async function loadFieldSets() {
-    const { data: rows, error } = await (supabase as any)
-        .from('student_field_sets')
-        .select('*')
-        .eq('teacher_id', data.profile.id)
-        .order('created_at', { ascending: false });
-    if (!error) {
-        fieldSets = rows || [];
-        if (fieldSets.length && !selectedFieldSetId) {
-            selectedFieldSetId = fieldSets[0].id;
-            await loadFieldsForSet(selectedFieldSetId);
-        }
-    } else {
-        console.error('Error loading field sets:', error);
-    }
-}
-
-async function loadFieldsForSet(fieldSetId: string) {
-    selectedFieldSetId = fieldSetId;
-    const { data: rows2, error } = await (supabase as any)
-        .from('student_fields')
-        .select('*')
-        .eq('field_set_id', fieldSetId)
-        .eq('active', true)
-        .order('order_index');
-    if (!error) {
-        fieldsForSelectedSet = rows2 || [];
-    } else {
-        console.error('Error loading fields:', error);
-    }
-}
-
-async function createFieldSet() {
-    if (!setForm.name.trim()) return;
-    const { data: created, error } = await (supabase as any)
-        .from('student_field_sets')
-        .insert({ teacher_id: data.profile.id, name: setForm.name.trim(), description: setForm.description.trim() || null })
-        .select()
-        .single();
-    if (!error && created) {
-        setForm = { name: '', description: '' };
-        await loadFieldSets();
-    } else {
-        console.error('Error creating field set:', error);
-    }
-}
-
-async function deleteFieldSet(id: string) {
-    if (!confirm('Delete this field set?')) return;
-    const { error } = await (supabase as any).from('student_field_sets').delete().eq('id', id);
-    if (!error) {
-        if (selectedFieldSetId === id) {
-            selectedFieldSetId = '';
-            fieldsForSelectedSet = [];
-        }
-        await loadFieldSets();
-    } else {
-        console.error('Error deleting field set:', error);
-    }
-}
-
-async function createField() {
-    if (!selectedFieldSetId || !fieldForm.key.trim() || !fieldForm.label.trim()) return;
-    const optionsValue = (() => {
-        if (fieldForm.type === 'select' || fieldForm.type === 'multiselect') {
-            try {
-                const parsed = typeof fieldForm.options === 'string' ? JSON.parse(fieldForm.options || '[]') : fieldForm.options;
-                return Array.isArray(parsed) ? parsed : [];
-            } catch {
-                return [];
-            }
-        }
-        return null;
-    })();
-    const { error } = await (supabase as any)
-        .from('student_fields')
-        .insert({
-            field_set_id: selectedFieldSetId,
-            key: fieldForm.key.trim(),
-            label: fieldForm.label.trim(),
-            type: fieldForm.type,
-            required: fieldForm.required,
-            options: optionsValue,
-            order_index: Number(fieldForm.order_index) || 0,
-            active: true
-        });
-    if (!error) {
-        fieldForm = { key: '', label: '', type: 'text', required: false, options: '', order_index: 0 };
-        await loadFieldsForSet(selectedFieldSetId);
-    } else {
-        console.error('Error creating field:', error);
-    }
-}
-
-async function deleteField(id: string) {
-    const { error } = await (supabase as any).from('student_fields').delete().eq('id', id);
-    if (!error) {
-        await loadFieldsForSet(selectedFieldSetId);
-    } else {
-        console.error('Error deleting field:', error);
-    }
-}
-
-async function loadCourseMappings(courseId: string) {
-    mappingCourseId = courseId;
-    attachedSetIdsForCourse = [];
-    if (!courseId) return;
-    const { data, error } = await (supabase as any)
-        .from('course_field_sets')
-        .select('field_set_id')
-        .eq('course_id', courseId)
-        .eq('active', true);
-    if (!error) {
-        attachedSetIdsForCourse = (data || []).map((r: any) => r.field_set_id);
-    }
-}
-
-async function toggleCourseSet(fieldSetId: string, checked: boolean) {
-    if (!mappingCourseId) return;
-    if (checked) {
-        const { error } = await (supabase as any)
-            .from('course_field_sets')
-            .insert({ course_id: mappingCourseId, field_set_id: fieldSetId });
-        if (error) console.error('Error attaching set:', error);
-    } else {
-        const { error } = await (supabase as any)
-            .from('course_field_sets')
-            .delete()
-            .eq('course_id', mappingCourseId)
-            .eq('field_set_id', fieldSetId);
-        if (error) console.error('Error detaching set:', error);
-    }
-    await loadCourseMappings(mappingCourseId);
-}
 
 	// Filter students based on search term and course
 	let filteredStudents = $derived(
@@ -286,7 +157,6 @@ async function toggleCourseSet(fieldSetId: string, checked: boolean) {
 				<Plus class="h-4 w-4 mr-2" />
 				Add Student
 			</button>
-			<a href="/dashboard/teacher/students/fields" class="ml-2 inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Custom Fields</a>
 		</div>
 	</div>
 
@@ -474,11 +344,6 @@ async function toggleCourseSet(fieldSetId: string, checked: boolean) {
 									</div>
 
 									<div>
-										<label for="custom_fields" class="block text-sm font-medium text-gray-700">Custom fields (JSON)</label>
-									<textarea id="custom_fields" name="custom_fields" rows="3" placeholder="&#123;&quot;instrument&quot;:&quot;piano&quot;,&quot;level&quot;:&quot;beginner&quot;&#125;" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"></textarea>
-										<p class="mt-1 text-xs text-gray-500">Optional JSON for any teacher-defined fields.</p>
-									</div>
-									<div>
 										<label for="course_id" class="block text-sm font-medium text-gray-700">Enroll in course (optional)</label>
                 <select id="course_id" name="course_id" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" onchange={(e) => loadDynamicFields((e.target as HTMLSelectElement).value)}>
 											<option value="">No course</option>
@@ -493,32 +358,48 @@ async function toggleCourseSet(fieldSetId: string, checked: boolean) {
                                 <div class="mt-6 space-y-4">
                                     <h4 class="text-sm font-medium text-gray-900">Course-specific fields</h4>
                                     {#each dynamicFields as field}
-                                        <div>
-                                            <label for={`field_${field.id}`} class="block text-sm font-medium text-gray-700">{field.label}{field.required ? ' *' : ''}</label>
-                                            {#if field.type === 'text'}
-                                                <input id={`field_${field.id}`} name={`field_${field.id}`} type="text" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-                                            {:else if field.type === 'number'}
-                                                <input id={`field_${field.id}`} name={`field_${field.id}`} type="number" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-                                            {:else if field.type === 'boolean'}
-                                                <select id={`field_${field.id}`} name={`field_${field.id}`} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                                                    <option value="">Select...</option>
-                                                    <option value="true">Yes</option>
-                                                    <option value="false">No</option>
-                                                </select>
-                                            {:else if field.type === 'date'}
-                                                <input id={`field_${field.id}`} name={`field_${field.id}`} type="date" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-                                            {:else if field.type === 'select'}
-                                                <select id={`field_${field.id}`} name={`field_${field.id}`} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                                                    <option value="">Select...</option>
-                                                    {#each (Array.isArray(field.options) ? field.options : field.options?.options || []) as opt}
-                                                        <option value={opt}>{opt}</option>
-                                                    {/each}
-                                                </select>
-                                            {:else if field.type === 'multiselect'}
-                                                <textarea id={`field_${field.id}`} name={`field_${field.id}`} rows="2" placeholder="Comma-separated values or JSON array" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"></textarea>
-                                                <p class="mt-1 text-xs text-gray-500">Enter a JSON array, e.g. ["Mon","Wed"]</p>
+                                        <div class={field.type === 'half_width' ? 'md:w-1/2' : ''}>
+                                            {#if field.type === 'section_title'}
+                                                <h2 class="text-xl font-semibold text-gray-900 mt-4 mb-2 border-b border-gray-200 pb-2">{field.label}</h2>
+                                                <input type="hidden" name={`field_${field.id}`} value="" />
                                             {:else}
-                                                <input id={`field_${field.id}`} name={`field_${field.id}`} type="text" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                                                <label for={`field_${field.id}`} class="block text-sm font-medium text-gray-700">{field.label}{field.required ? ' *' : ''}</label>
+                                                {#if field.type === 'text'}
+                                                    <input id={`field_${field.id}`} name={`field_${field.id}`} type="text" required={field.required} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                                                {:else if field.type === 'email'}
+                                                    <input id={`field_${field.id}`} name={`field_${field.id}`} type="email" required={field.required} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                                                {:else if field.type === 'phone'}
+                                                    <input id={`field_${field.id}`} name={`field_${field.id}`} type="tel" required={field.required} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                                                {:else if field.type === 'textarea'}
+                                                    <textarea id={`field_${field.id}`} name={`field_${field.id}`} rows="3" required={field.required} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"></textarea>
+                                                {:else if field.type === 'number'}
+                                                    <input id={`field_${field.id}`} name={`field_${field.id}`} type="number" required={field.required} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                                                {:else if field.type === 'checkbox'}
+                                                    <div class="mt-1 flex items-center">
+                                                        <input id={`field_${field.id}`} name={`field_${field.id}`} type="checkbox" value="true" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" />
+                                                        <label for={`field_${field.id}`} class="ml-2 text-sm text-gray-600">{field.label}</label>
+                                                    </div>
+                                                {:else if field.type === 'date'}
+                                                    <input id={`field_${field.id}`} name={`field_${field.id}`} type="date" required={field.required} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                                                {:else if field.type === 'select'}
+                                                    <select id={`field_${field.id}`} name={`field_${field.id}`} required={field.required} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                                        <option value="">Select...</option>
+                                                        {#each (Array.isArray(field.options) ? field.options : []) as opt}
+                                                            <option value={opt}>{opt}</option>
+                                                        {/each}
+                                                    </select>
+                                                {:else if field.type === 'multiselect'}
+                                                    <select id={`field_${field.id}`} name={`field_${field.id}`} multiple required={field.required} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" size="4">
+                                                        {#each (Array.isArray(field.options) ? field.options : []) as opt}
+                                                            <option value={opt}>{opt}</option>
+                                                        {/each}
+                                                    </select>
+                                                    <p class="mt-1 text-xs text-gray-500">Hold Ctrl/Cmd to select multiple options</p>
+                                                {:else if field.type === 'half_width'}
+                                                    <input id={`field_${field.id}`} name={`field_${field.id}`} type="text" required={field.required} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                                                {:else}
+                                                    <input id={`field_${field.id}`} name={`field_${field.id}`} type="text" required={field.required} class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                                                {/if}
                                             {/if}
                                         </div>
                                     {/each}
@@ -537,103 +418,6 @@ async function toggleCourseSet(fieldSetId: string, checked: boolean) {
 						</button>
 					</div>
 				</form>
-			</div>
-		</div>
-	</div>
-{/if}
-
-<!-- Custom Fields Manager Modal -->
-{#if showCustomFieldsModal}
-	<div class="fixed inset-0 z-50 overflow-y-auto">
-		<div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-			<button type="button" class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-label="Close" onclick={() => (showCustomFieldsModal = false)}></button>
-
-			<div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full">
-				<div class="bg-white p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-					<div>
-						<h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Field Sets</h3>
-						<div class="space-y-3">
-							<div class="flex gap-2">
-								<input placeholder="Set name" bind:value={setForm.name} class="flex-1 border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-								<input placeholder="Description" bind:value={setForm.description} class="flex-1 border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-								<button class="px-3 py-2 bg-indigo-600 text-white rounded" onclick={createFieldSet}>Add Set</button>
-							</div>
-							<ul class="divide-y divide-gray-200 bg-white rounded border">
-								{#each fieldSets as set}
-								<li class="p-3 flex items-center justify-between">
-									<button class="text-left" onclick={() => loadFieldsForSet(set.id)}>{set.name}</button>
-									<button class="text-red-600" onclick={() => deleteFieldSet(set.id)}>Delete</button>
-								</li>
-								{/each}
-							</ul>
-						</div>
-					</div>
-					<div>
-						<h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Fields {selectedFieldSetId ? '' : '(select a set)'}</h3>
-						{#if selectedFieldSetId}
-						<div class="space-y-3">
-							<div class="grid grid-cols-1 md:grid-cols-6 gap-2">
-								<input placeholder="key" bind:value={fieldForm.key} class="md:col-span-2 border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-								<input placeholder="label" bind:value={fieldForm.label} class="md:col-span-2 border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-								<select bind:value={fieldForm.type} class="border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-									<option value="text">text</option>
-									<option value="number">number</option>
-									<option value="boolean">boolean</option>
-									<option value="date">date</option>
-									<option value="select">select</option>
-									<option value="multiselect">multiselect</option>
-								</select>
-								<label class="inline-flex items-center text-sm text-gray-700"><input type="checkbox" bind:checked={fieldForm.required} class="mr-2">Required</label>
-								<input type="number" placeholder="order" bind:value={fieldForm.order_index} class="border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-								<input placeholder='options JSON ["A","B"]' bind:value={fieldForm.options} class="md:col-span-3 border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-								<button class="px-3 py-2 bg-indigo-600 text-white rounded" onclick={createField}>Add Field</button>
-							</div>
-
-							<ul class="divide-y divide-gray-200 bg-white rounded border mt-2">
-								{#each fieldsForSelectedSet as f}
-								<li class="p-3 flex items-center justify-between">
-									<div class="text-sm text-gray-700">{f.label} <span class="text-gray-400">({f.type})</span></div>
-									<button class="text-red-600" onclick={() => deleteField(f.id)}>Delete</button>
-								</li>
-								{/each}
-							</ul>
-						</div>
-						{/if}
-					</div>
-
-					<div class="md:col-span-2">
-						<h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Attach Sets to Course</h3>
-						<div class="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
-							<div>
-								<label for="mapping_course" class="block text-sm font-medium text-gray-700">Course</label>
-								<select id="mapping_course" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" bind:value={mappingCourseId} onchange={(e) => loadCourseMappings((e.target as HTMLSelectElement).value)}>
-									<option value="">Select course</option>
-									{#each courses as c}
-										<option value={c.id}>{c.title}</option>
-									{/each}
-								</select>
-							</div>
-							<div class="md:col-span-2">
-								{#if mappingCourseId}
-								<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-									{#each fieldSets as set}
-									<label class="inline-flex items-center">
-										<input type="checkbox" checked={attachedSetIdsForCourse.includes(set.id)} onchange={(e) => toggleCourseSet(set.id, (e.target as HTMLInputElement).checked)} class="mr-2">
-										<span>{set.name}</span>
-									</label>
-									{/each}
-								</div>
-								{/if}
-							</div>
-						</div>
-					</div>
-
-					<div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-						<button type="button" onclick={() => (showCustomFieldsModal = false)} class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm">
-							Close
-						</button>
-					</div>
-				</div>
 			</div>
 		</div>
 	</div>

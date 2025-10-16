@@ -11,6 +11,19 @@
     let editingSetId = $state<string | null>(null);
     let editForm = $state({ name: '', description: '' });
     let showCreateModal = $state(false);
+    let courseAssignments = $state<Record<string, any[]>>({});
+    let selectedCourseForAssignment = $state<string>('');
+    let loadingAssignments = $state<Record<string, boolean>>({});
+    let assignmentsVersion = $state(0); // Force reactivity
+    
+    // Initialize courseAssignments for all field sets
+    function initializeCourseAssignments() {
+        fieldSets.forEach(set => {
+            if (!courseAssignments[set.id]) {
+                courseAssignments[set.id] = [];
+            }
+        });
+    }
 
     onMount(async () => {
         await refreshSets();
@@ -50,7 +63,7 @@
                     const fieldsPerSet = Object.keys(schema).length;
                     
                     for (let i = 0; i < actualData.length; i += fieldsPerSet) {
-                        const fieldSet = {};
+                        const fieldSet: any = {};
                         Object.keys(schema).forEach((key, index) => {
                             fieldSet[key] = actualData[i + index];
                         });
@@ -58,6 +71,17 @@
                     }
                     
                     fieldSets = fieldSetsArray;
+                    
+                    // Initialize course assignments
+                    initializeCourseAssignments();
+                    
+                    // Load course assignments for all field sets
+                    for (const set of fieldSetsArray) {
+                        await loadCourseAssignments((set as any).id);
+                    }
+                    
+                    // Force reactivity update
+                    courseAssignments = { ...courseAssignments };
                 } else {
                     console.error('Error loading field sets:', result?.error || 'Unknown error');
                 }
@@ -73,10 +97,6 @@
 
     async function createFieldSet() {}
 
-    function startEdit(set: any) {
-        editingSetId = set.id;
-        editForm = { name: set.name, description: set.description || '' };
-    }
 
     async function saveEdit() {
         if (!editingSetId) return;
@@ -106,6 +126,124 @@
             console.error('Delete set error:', json?.error || 'Unknown error');
         }
     }
+
+    async function loadCourseAssignments(fieldSetId: string) {
+        try {
+            loadingAssignments[fieldSetId] = true;
+            const fd = new FormData();
+            fd.append('field_set_id', fieldSetId);
+            const res = await fetch('?/get_course_assignments', { method: 'POST', body: fd });
+            const text = await res.text();
+            const json = JSON.parse(text);
+            const actionResult = JSON.parse(json.data);
+            
+            if (actionResult[0]?.success) {
+                // Handle both new and old data formats
+                let assignments = actionResult[0].assignments || [];
+                
+                // If assignments is a number (count) and there are no assignments, set to empty array
+                if (typeof assignments === 'number' && assignments === 0) {
+                    assignments = [];
+                }
+                
+                // If assignments is not an array, try to parse from the raw data format
+                if (!Array.isArray(assignments) && actionResult.length > 3) {
+                    const assignmentsData = actionResult.slice(3);
+                    assignments = [];
+                    
+                    // Parse the data structure: [course_id_object, course_id_string, courses_object, title, course_code]
+                    const courseIdString = assignmentsData[1];
+                    const title = assignmentsData[3];
+                    const courseCode = assignmentsData[4];
+                    
+                    // Use the string version of the course ID
+                    if (courseIdString && typeof courseIdString === 'string') {
+                        assignments.push({
+                            course_id: courseIdString,
+                            courses: {
+                                title: title,
+                                course_code: courseCode
+                            }
+                        });
+                    }
+                }
+                
+                // Remove duplicates based on course_id (only if assignments is an array)
+                const uniqueAssignments = Array.isArray(assignments) 
+                    ? assignments.filter((assignment: any, index: number, self: any[]) => 
+                        index === self.findIndex((a: any) => a.course_id === assignment.course_id)
+                      )
+                    : [];
+                
+                // Update the assignments and force reactivity
+                courseAssignments[fieldSetId] = uniqueAssignments;
+                // Force reactivity by creating a new object reference and incrementing version
+                courseAssignments = { ...courseAssignments };
+                assignmentsVersion++;
+                
+            } else {
+                console.error('Load course assignments error:', actionResult[0]?.error || 'Unknown error');
+                courseAssignments[fieldSetId] = [];
+            }
+        } catch (error) {
+            console.error('Load course assignments error:', error);
+            courseAssignments[fieldSetId] = [];
+        } finally {
+            loadingAssignments[fieldSetId] = false;
+        }
+    }
+
+    async function assignToCourse(fieldSetId: string, courseId: string) {
+        try {
+            const fd = new FormData();
+            fd.append('field_set_id', fieldSetId);
+            fd.append('course_id', courseId);
+            const res = await fetch('?/assign_to_course', { method: 'POST', body: fd });
+            const text = await res.text();
+            const json = JSON.parse(text);
+            const actionResult = JSON.parse(json.data);
+            
+            if (actionResult[0]?.success) {
+                await loadCourseAssignments(fieldSetId);
+            } else {
+                console.error('Assign to course error:', actionResult[0]?.error || 'Unknown error');
+                alert('Failed to assign field set to course: ' + (actionResult[0]?.error || 'Unknown error'));
+            }
+        } catch (error) {
+            console.error('Assign to course error:', error);
+            alert('Failed to assign field set to course: ' + error);
+        }
+    }
+
+    async function unassignFromCourse(fieldSetId: string, courseId: string) {
+        try {
+            const fd = new FormData();
+            fd.append('field_set_id', fieldSetId);
+            fd.append('course_id', courseId);
+            const res = await fetch('?/unassign_from_course', { method: 'POST', body: fd });
+            const text = await res.text();
+            const json = JSON.parse(text);
+            const actionResult = JSON.parse(json.data);
+            
+            if (actionResult[0]?.success) {
+                await loadCourseAssignments(fieldSetId);
+            } else {
+                console.error('Unassign from course error:', actionResult[0]?.error || 'Unknown error');
+                alert('Failed to unassign field set from course: ' + (actionResult[0]?.error || 'Unknown error'));
+            }
+        } catch (error) {
+            console.error('Unassign from course error:', error);
+            alert('Failed to unassign field set from course: ' + error);
+        }
+    }
+
+    function startEdit(set: any) {
+        editingSetId = set.id;
+        editForm = { name: set.name, description: set.description || '' };
+        selectedCourseForAssignment = ''; // Clear any previously selected course
+        // Load course assignments for this set
+        loadCourseAssignments(set.id);
+    }
 </script>
 
 <div class="px-4 sm:px-6 lg:px-8 py-8">
@@ -115,9 +253,14 @@
                 <h1 class="text-3xl font-bold text-gray-900">Student Field Sets</h1>
                 <p class="mt-2 text-gray-600">Create and manage custom field sets for your courses.</p>
             </div>
-            <button onclick={() => (showCreateModal = true)} class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
-                <Plus class="h-4 w-4 mr-2" /> New set
-            </button>
+            <div class="flex gap-2">
+                <button onclick={async () => { for (const set of fieldSets) { await loadCourseAssignments(set.id); } courseAssignments = { ...courseAssignments }; }} class="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50">
+                    Refresh Assignments
+                </button>
+                <button onclick={() => (showCreateModal = true)} class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
+                    <Plus class="h-4 w-4 mr-2" /> New set
+                </button>
+            </div>
         </div>
     </div>
 
@@ -135,22 +278,101 @@
                 {#each fieldSets as set}
                     <li class="px-6 py-4">
                         {#if editingSetId === set.id}
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                                <input bind:value={editForm.name} class="border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-                                <input bind:value={editForm.description} class="md:col-span-2 border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
-                                <div class="md:col-span-3 flex gap-2">
-                                    <form method="POST" action="?/update_set" onsubmit={async (e) => { e.preventDefault(); const form = e.currentTarget as HTMLFormElement; const fd = new FormData(form); fd.append('id', editingSetId as string); const res = await fetch(form.action, { method: 'POST', body: fd }); const json = await res.json().catch(() => null); if (json?.success) { editingSetId = null; await refreshSets(); } else { alert(json?.error || 'Update failed'); } }}>
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                    <input bind:value={editForm.name} placeholder="Set name" class="border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                                    <input bind:value={editForm.description} placeholder="Description" class="md:col-span-2 border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                                </div>
+                                
+                                <!-- Course Assignment Section -->
+                                <div class="border-t pt-4">
+                                    <h4 class="text-sm font-medium text-gray-900 mb-3">Course Assignments</h4>
+                                    
+                                    <!-- Current Assignments -->
+                                    {#if courseAssignments[set.id] && courseAssignments[set.id].length > 0}
+                                        <div class="mb-3">
+                                            <p class="text-sm text-gray-600 mb-2">Currently assigned to:</p>
+                                            <div class="flex flex-wrap gap-2">
+                                                {#each courseAssignments[set.id] as assignment}
+                                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                                                        {assignment.courses.title}
+                                                        {#if assignment.courses.course_code}
+                                                            ({assignment.courses.course_code})
+                                                        {/if}
+                                                        <button 
+                                                            type="button"
+                                                            onclick={() => unassignFromCourse(set.id, assignment.course_id)}
+                                                            class="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full text-indigo-400 hover:text-indigo-600 hover:bg-indigo-200"
+                                                        >
+                                                            ×
+                                                        </button>
+                                                    </span>
+                                                {/each}
+                                            </div>
+                                        </div>
+                                    {/if}
+                                    
+                                    <!-- Add New Assignment -->
+                                    <div>
+                                        <select 
+                                            bind:value={selectedCourseForAssignment}
+                                            class="w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                        >
+                                            <option value="">Select a course to assign...</option>
+                                            {#each data.courses as course}
+                                                {#if !(courseAssignments[set.id] || []).some(a => a.course_id === course.id)}
+                                                    <option value={course.id}>
+                                                        {course.title}
+                                                        {#if course.course_code}
+                                                            ({course.course_code})
+                                                        {/if}
+                                                    </option>
+                                                {/if}
+                                            {/each}
+                                        </select>
+                                        <p class="mt-1 text-xs text-gray-500">Selected course will be assigned when you save</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="flex gap-2">
+                                    <form method="POST" action="?/update_set" onsubmit={async (e) => { e.preventDefault(); try { const form = e.currentTarget as HTMLFormElement; const fd = new FormData(form); fd.append('id', editingSetId as string);  const res = await fetch(form.action, { method: 'POST', body: fd }); const text = await res.text();  const json = JSON.parse(text); const actionResult = JSON.parse(json.data);  if (actionResult[0]?.success) { if (selectedCourseForAssignment) { await assignToCourse(editingSetId as string, selectedCourseForAssignment); selectedCourseForAssignment = ''; } editingSetId = null; await refreshSets(); } else { alert('Update failed: ' + (actionResult[0]?.error || 'Unknown error')); } } catch (error) { console.error('Save error:', error); alert('Update failed: ' + error); } }}>
                                         <input type="hidden" name="name" value={editForm.name} />
                                         <input type="hidden" name="description" value={editForm.description} />
                                         <button type="submit" class="px-3 py-2 bg-indigo-600 text-white rounded">Save</button>
                                     </form>
-                                    <button class="px-3 py-2 border rounded" onclick={() => (editingSetId = null)}>Cancel</button>
+                                    <button class="px-3 py-2 border rounded" onclick={() => { editingSetId = null; selectedCourseForAssignment = ''; }}>Cancel</button>
                                 </div>
                             </div>
                         {:else}
                             <div class="flex items-center justify-between">
-                                <div>
+                                <div class="flex-1">
                                     <div class="set-name text-sm font-medium text-gray-900">{set.name}</div>
+                                    {#if set.description}
+                                        <div class="text-sm text-gray-500 mt-1">{set.description}</div>
+                                    {/if}
+                                    <!-- Show course assignments if any -->
+                                    {#if loadingAssignments[set.id]}
+                                        <div class="mt-2 text-xs text-gray-400">Loading course assignments...</div>
+                                    {:else if courseAssignments[set.id] && courseAssignments[set.id].length > 0}
+                                        <div class="mt-2">
+                                            <span class="text-xs text-gray-500">Assigned to: </span>
+                                            <div class="inline-flex flex-wrap gap-1">
+                                                {#each courseAssignments[set.id] as assignment}
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                                        {assignment.courses.title}
+                                                        {#if assignment.courses.course_code}
+                                                            ({assignment.courses.course_code})
+                                                        {/if}
+                                                    </span>
+                                                {/each}
+                                            </div>
+                                        </div>
+                                    {:else}
+                                        <!-- Show when no assignments -->
+                                        <div class="mt-2 text-xs text-gray-400">
+                                            No course assignments
+                                        </div>
+                                    {/if}
                                 </div>
                                 <div class="flex gap-3">
                                     <a href="/dashboard/teacher/students/fields/{set.id}" class="text-blue-600 hover:text-blue-900 text-sm">Manage Fields</a>

@@ -5,13 +5,19 @@
 	import { slide } from 'svelte/transition';
 	import { 
 		LogOut, User, Settings, Bell, Home, Book, BookOpen, Users, 
-		Mail, BarChart, User as UserIcon, Menu, X
+		Mail, BarChart, User as UserIcon, Menu, X, FileText
 	} from 'lucide-svelte';
 	import type { LayoutData } from './$types';
 
 	let { data, children }: { data: LayoutData; children: any } = $props();
 
 	let mobileMenuOpen = $state(false);
+	let expandedItems = $state(new Set());
+
+	// Simple function to check if Students should be expanded
+	function isStudentsExpanded() {
+		return data.profile.role === 'teacher' && $page.url.pathname.startsWith('/dashboard/teacher/students');
+	}
 
 	async function handleLogout() {
 		try {
@@ -51,7 +57,14 @@
 					{ name: 'Dashboard', href: '/dashboard/teacher', icon: Home },
 					{ name: 'Courses', href: '/dashboard/teacher/courses', icon: Book },
 					{ name: 'Lessons', href: '/dashboard/teacher/lessons', icon: BookOpen },
-					{ name: 'Students', href: '/dashboard/teacher/students', icon: Users },
+					{ 
+						name: 'Students', 
+						href: '/dashboard/teacher/students', 
+						icon: Users,
+						subItems: [
+							{ name: 'Custom Fields', href: '/dashboard/teacher/students/fields', icon: FileText }
+						]
+					},
 					{ name: 'Messages', href: '/dashboard/teacher/messages', icon: Mail },
 					{ name: 'Analytics', href: '/dashboard/teacher/analytics', icon: BarChart },
 					{ name: 'Settings', href: '/dashboard/teacher/settings', icon: Settings }
@@ -75,6 +88,32 @@
 
 	function closeMobileMenu() {
 		mobileMenuOpen = false;
+	}
+
+	function toggleExpanded(itemName: string) {
+		if (expandedItems.has(itemName)) {
+			expandedItems.delete(itemName);
+		} else {
+			expandedItems.add(itemName);
+		}
+		expandedItems = expandedItems; // trigger reactivity
+	}
+
+	function handleItemClick(item: any) {
+		// Navigate to the main item's href
+		goto(item.href);
+		// Only toggle if not Students (Students auto-expands based on path)
+		if (item.name !== 'Students') {
+			toggleExpanded(item.name);
+		}
+	}
+
+	function isItemActive(item: any): boolean {
+		if ($page.url.pathname === item.href) return true;
+		if (item.subItems) {
+			return item.subItems.some((subItem: any) => $page.url.pathname === subItem.href);
+		}
+		return false;
 	}
 
 	const navigationItems = getNavigationItems(data.profile.role);
@@ -141,13 +180,47 @@
 					<nav class="px-4 py-4 space-y-2 overflow-hidden" style="height: calc(100vh - 8rem);">
 						{#each navigationItems as item}
 							{@const IconComponent = item.icon}
-							<a
-								href={item.href}
-								class="flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 {$page.url.pathname === item.href ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}"
-							>
-								<IconComponent class="h-5 w-5 mr-3" />
-								<span>{item.name}</span>
-							</a>
+							{@const isActive = isItemActive(item)}
+							{@const isExpanded = item.name === 'Students' ? isStudentsExpanded() : expandedItems.has(item.name)}
+							{@const hasSubItems = item.subItems && item.subItems.length > 0}
+							
+							<div class="space-y-1">
+								<!-- Main item -->
+												{#if hasSubItems}
+													<button
+														onclick={() => handleItemClick(item)}
+														class="flex items-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 {isActive ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}"
+													>
+										<IconComponent class="h-5 w-5 mr-3" />
+										<span class="flex-1 text-left">{item.name}</span>
+										<span class="text-xs {isExpanded ? 'rotate-180' : ''} transition-transform duration-200">▼</span>
+									</button>
+								{:else}
+									<a
+										href={item.href}
+										class="flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 {isActive ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}"
+									>
+										<IconComponent class="h-5 w-5 mr-3" />
+										<span>{item.name}</span>
+									</a>
+								{/if}
+								
+								<!-- Sub items -->
+								{#if hasSubItems && isExpanded}
+									<div class="ml-6 space-y-1">
+										{#each item.subItems as subItem}
+											{@const SubIconComponent = subItem.icon}
+											<a
+												href={subItem.href}
+												class="flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 {$page.url.pathname === subItem.href ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'}"
+											>
+												<SubIconComponent class="h-4 w-4 mr-3" />
+												<span>{subItem.name}</span>
+											</a>
+										{/each}
+									</div>
+								{/if}
+							</div>
 						{/each}
 					</nav>
 					
@@ -210,14 +283,49 @@
 					<nav class="px-4 py-4 space-y-2 overflow-hidden" style="height: calc(100vh - 8rem);">
 						{#each navigationItems as item}
 							{@const IconComponent = item.icon}
-							<a
-								href={item.href}
-								onclick={closeMobileMenu}
-								class="flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 {$page.url.pathname === item.href ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}"
-							>
-								<IconComponent class="h-5 w-5 mr-3" />
-								<span>{item.name}</span>
-							</a>
+							{@const isActive = isItemActive(item)}
+							{@const isExpanded = item.name === 'Students' ? isStudentsExpanded() : expandedItems.has(item.name)}
+							{@const hasSubItems = item.subItems && item.subItems.length > 0}
+							
+							<div class="space-y-1">
+								<!-- Main item -->
+												{#if hasSubItems}
+													<button
+														onclick={() => handleItemClick(item)}
+														class="flex items-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 {isActive ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}"
+													>
+										<IconComponent class="h-5 w-5 mr-3" />
+										<span class="flex-1 text-left">{item.name}</span>
+										<span class="text-xs {isExpanded ? 'rotate-180' : ''} transition-transform duration-200">▼</span>
+									</button>
+								{:else}
+									<a
+										href={item.href}
+										onclick={closeMobileMenu}
+										class="flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 {isActive ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}"
+									>
+										<IconComponent class="h-5 w-5 mr-3" />
+										<span>{item.name}</span>
+									</a>
+								{/if}
+								
+								<!-- Sub items -->
+								{#if hasSubItems && isExpanded}
+									<div class="ml-6 space-y-1">
+										{#each item.subItems as subItem}
+											{@const SubIconComponent = subItem.icon}
+											<a
+												href={subItem.href}
+												onclick={closeMobileMenu}
+												class="flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 {$page.url.pathname === subItem.href ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'}"
+											>
+												<SubIconComponent class="h-4 w-4 mr-3" />
+												<span>{subItem.name}</span>
+											</a>
+										{/each}
+									</div>
+								{/if}
+							</div>
 						{/each}
 					</nav>
 					

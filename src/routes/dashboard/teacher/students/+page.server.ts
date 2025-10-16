@@ -139,6 +139,12 @@ export const actions: Actions = {
 					for (const field of setFields) {
 						const formKey = `field_${field.id}`;
 						const raw = formData.get(formKey);
+						
+						// Skip validation for section titles as they don't store user input
+						if (field.type === 'section_title') {
+							continue;
+						}
+						
 						if (raw == null || String(raw).trim() === '') {
 							if (field.required) {
 								return { success: false, error: `Missing required field: ${field.label}` };
@@ -153,8 +159,10 @@ export const actions: Actions = {
 							case 'multiselect':
 								try { value = JSON.parse(String(raw)); if (!Array.isArray(value)) throw new Error('not array'); } catch { return { success: false, error: `${field.label} must be an array` }; }
 								break;
+							case 'section_title': value = ''; break; // Section titles don't store values
 							case 'select':
 							case 'text':
+							case 'textarea':
 							default: value = String(raw); break;
 						}
 
