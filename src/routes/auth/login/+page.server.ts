@@ -1,10 +1,14 @@
 import type { PageServerLoad, Actions } from './$types';
 import { redirect } from '@sveltejs/kit';
 import { AuthService } from '$lib/auth';
+import { createServerSupabaseClient } from '$lib/supabase-server-helpers';
 
-export const load: PageServerLoad = async ({ url, locals }) => {
+export const load: PageServerLoad = async ({ url, locals, cookies }) => {
+	// Create server-side Supabase client
+	const supabase = createServerSupabaseClient({ url, locals, cookies } as any);
+	
 	// Check if user is already logged in
-	const { user, profile } = await AuthService.getCurrentUser();
+	const { user, profile } = await AuthService.getCurrentUserServer(supabase);
 	
 	if (user && profile) {
 		// Redirect to appropriate dashboard
@@ -18,7 +22,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 };
 
 export const actions: Actions = {
-	default: async ({ request, cookies }) => {
+	default: async ({ request, cookies, url, locals }) => {
 		const formData = await request.formData();
 		const email = formData.get('email') as string;
 		const password = formData.get('password') as string;
@@ -29,8 +33,11 @@ export const actions: Actions = {
 			};
 		}
 
+		// Create server-side Supabase client
+		const supabase = createServerSupabaseClient({ url, locals, cookies } as any);
+
 		try {
-			const { data, error: authError } = await AuthService.signIn(email, password);
+			const { data, error: authError } = await AuthService.signInServer(supabase, email, password);
 			
 			if (authError) {
 				return {
@@ -40,7 +47,7 @@ export const actions: Actions = {
 
 			if (data.user) {
 				// Get profile to determine redirect
-				const { profile } = await AuthService.getCurrentUser();
+				const { profile } = await AuthService.getCurrentUserServer(supabase);
 				if (profile) {
 					const redirectPath = AuthService.getRedirectPath(profile);
 					throw redirect(302, redirectPath);

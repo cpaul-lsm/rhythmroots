@@ -4,9 +4,13 @@ import type { Tables } from './supabase';
 export type UserRole = 'student' | 'teacher' | 'super_admin';
 export type UserProfile = Tables<'profiles'>;
 
+/**
+ * Client-side authentication service
+ * Use this for browser/client-side operations
+ */
 export class AuthService {
 	/**
-	 * Get current user with profile data
+	 * Get current user with profile data (client-side)
 	 */
 	static async getCurrentUser(): Promise<{ user: any; profile: UserProfile | null; error: any }> {
 		try {
@@ -17,6 +21,32 @@ export class AuthService {
 			}
 
 			const { data: profile, error: profileError } = await supabase
+				.from('profiles')
+				.select('*')
+				.eq('id', user.id)
+				.single();
+
+			return { user, profile, error: profileError };
+		} catch (error) {
+			return { user: null, profile: null, error };
+		}
+	}
+
+	/**
+	 * Get current user with profile data (server-side)
+	 * Pass a server Supabase client as parameter
+	 */
+	static async getCurrentUserServer(
+		supabaseClient: any
+	): Promise<{ user: any; profile: UserProfile | null; error: any }> {
+		try {
+			const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+			
+			if (userError || !user) {
+				return { user: null, profile: null, error: userError };
+			}
+
+			const { data: profile, error: profileError } = await supabaseClient
 				.from('profiles')
 				.select('*')
 				.eq('id', user.id)
@@ -54,7 +84,7 @@ export class AuthService {
 	}
 
 	/**
-	 * Sign in with email and password
+	 * Sign in with email and password (client-side)
 	 */
 	static async signIn(email: string, password: string) {
 		const { data, error } = await supabase.auth.signInWithPassword({
@@ -66,11 +96,38 @@ export class AuthService {
 	}
 
 	/**
-	 * Sign out current user
+	 * Sign in with email and password (server-side)
+	 * Pass a server Supabase client as parameter
+	 */
+	static async signInServer(
+		supabaseClient: any,
+		email: string, 
+		password: string
+	) {
+		const { data, error } = await supabaseClient.auth.signInWithPassword({
+			email,
+			password
+		});
+
+		return { data, error };
+	}
+
+	/**
+	 * Sign out current user (client-side)
 	 */
 	static async signOut() {
 		// Sign out from all sessions
 		const { error } = await supabase.auth.signOut({ scope: 'global' });
+		return { error };
+	}
+
+	/**
+	 * Sign out current user (server-side)
+	 * Pass a server Supabase client as parameter
+	 */
+	static async signOutServer(supabaseClient: any) {
+		// Sign out from all sessions
+		const { error } = await supabaseClient.auth.signOut({ scope: 'global' });
 		return { error };
 	}
 

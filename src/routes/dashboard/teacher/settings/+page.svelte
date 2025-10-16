@@ -233,7 +233,7 @@
 	}
 
 	// Computed property for the full URL
-	let fullUrl = $derived(profileData.account_slug ? `https://yousingit.live/${profileData.account_slug}` : '');
+	let fullUrl = $derived(profileData.account_slug ? `https://rhythmroots.music/${profileData.account_slug}` : '');
 </script>
 
 <div class="px-4 sm:px-6 lg:px-8 py-8">

@@ -1,11 +1,14 @@
 import type { LayoutServerLoad } from './$types';
 import { AuthService } from '$lib/auth';
-import { supabaseServer } from '$lib/supabase-server';
+import { createServerSupabaseClient } from '$lib/supabase-server-helpers';
 import { redirect } from '@sveltejs/kit';
 
-export const load: LayoutServerLoad = async ({ url, locals }) => {
+export const load: LayoutServerLoad = async ({ url, locals, cookies }) => {
+	// Create server-side Supabase client
+	const supabase = createServerSupabaseClient({ url, locals, cookies } as any);
+	
 	// Get current user and profile
-	const { user, profile, error } = await AuthService.getCurrentUser();
+	const { user, profile, error } = await AuthService.getCurrentUserServer(supabase);
 	
 	// Only redirect if user is not authenticated and trying to access protected routes
 	const protectedRoutes = ['/dashboard'];
